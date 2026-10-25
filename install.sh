@@ -66,7 +66,7 @@ echo "A Tweak page opened in your browser. Sign in there; this window can stay i
 for _ in $(seq 1 900); do [ -f "$HOME/Tweak/.signin.json" ] && break; sleep 2; done
 grep -q '"ok":true' "$HOME/Tweak/.signin.json" 2>/dev/null || stop "The sign-in did not finish within 30 minutes."
 WIX=$(node -p "require('$HOME/Tweak/.signin.json').wixAccount")
-TOKEN=$(gh auth token --hostname github.com --user "$WIX")
+TOKEN=$(gh auth token --hostname github.com --user "$WIX" 2>/dev/null || gh auth token --hostname github.com)   # a GH_TOKEN sign-in has no name to ask by
 
 progress 3 25 "Getting Tweak"
 if [ ! -d "$APP/.git" ]; then
@@ -75,10 +75,10 @@ if [ ! -d "$APP/.git" ]; then
 fi
 cd "$APP" || stop "The Tweak folder is missing."
 
-progress 4 35 "Getting Tweak’s parts" "About a gigabyte, once."
+progress 4 35 "Getting Tweak’s parts" "Under a gigabyte, once."
 until curl -s -o /dev/null --max-time 6 https://npm.dev.wixpress.com/; do progress 4 35 "Getting Tweak’s parts" "" true; sleep 5; done
 ( npm ci --no-audit --no-fund >> "$LOG" 2>&1 ) & CI=$!
-p=35; while kill -0 $CI 2>/dev/null; do sleep 3; [ $p -lt 80 ] && p=$((p + 1)); progress 4 $p "Getting Tweak’s parts" "$(tail -1 "$LOG" | cut -c1-80 | tr -d '"\\')"; done
+p=35; while kill -0 $CI 2>/dev/null; do sleep 3; [ $p -lt 80 ] && p=$((p + 1)); progress 4 $p "Getting Tweak’s parts" "Under a gigabyte, once. $(ls node_modules 2>/dev/null | wc -l | tr -d ' ') parts so far."; done
 wait $CI || stop "Tweak’s parts did not download."
 ( npx --yes playwright-core install chromium-headless-shell >> "$LOG" 2>&1 ) & SHOT=$!
 

@@ -64,11 +64,14 @@ export async function signinSteps({ gh = ghRun, onCode, already = false }) {
   }
   const status = await gh(['auth', 'status', '--hostname', 'github.com']);
   const accounts = [...status.out.matchAll(/account (\S+)/g)].map((m) => m[1]);
+  /* The active account, for a sign-in gh holds as a GH_TOKEN setting: gh cannot hand that one out by name. */
+  const active = status.out.match(/account (\S+)[^\n]*\n\s*- Active account: true/)?.[1] ?? null;
   let wixAccount = null;
   let tok = '';
   let sso = false;
   for (const a of accounts) {
-    const t = (await gh(['auth', 'token', '--hostname', 'github.com', '--user', a])).out.trim();
+    const byName = await gh(['auth', 'token', '--hostname', 'github.com', '--user', a]);
+    const t = (byName.ok ? byName : a === active ? await gh(['auth', 'token', '--hostname', 'github.com']) : byName).out.trim();
     const m = await gh(['api', 'user/memberships/orgs/wix-private', '--jq', '.state'], { env: { ...process.env, GH_TOKEN: t } });
     if (m.out.trim() === 'active') { wixAccount = a; tok = t; break; }
     if (!m.ok && /HTTP 403|SAML/.test(m.out)) sso = true;   // a member who has not allowed this sign-in for Wix yet
