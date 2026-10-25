@@ -88,11 +88,13 @@ if [ -d node_modules ] && [ "$(cat "$HOME/Tweak/.parts-sum" 2>/dev/null)" = "$LO
 else ( npm ci --no-audit --no-fund >> "$LOG" 2>&1 && echo "$LOCK_SUM" > "$HOME/Tweak/.parts-sum" ) & CI=$!; fi
 p=35; while kill -0 $CI 2>/dev/null; do sleep 3; [ $p -lt 80 ] && p=$((p + 1)); progress 4 $p "Getting Tweak’s parts" "Under a gigabyte, once. $(ls node_modules 2>/dev/null | wc -l | tr -d ' ') parts so far."; done
 wait $CI || stop "Tweak’s parts did not download."
-( npx --yes playwright-core install chromium-headless-shell >> "$LOG" 2>&1 ) & SHOT=$!
+# The camera's own Chrome (about 100 MB) is optional: without it the camera borrows the person's Chrome.
+# It keeps downloading after this script ends and is never waited on: on the Wix VPN it can stall, and an
+# install would sit at "Opening Tweak" waiting for it (2026-10-25, Omer's Mac stopped there).
+nohup npx --yes playwright-core install chromium-headless-shell >> "$LOG" 2>&1 < /dev/null &
 
 progress 5 90 "Opening Tweak"
 if [ -z "${TWEAK_INSTALL_NO_OPEN:-}" ]; then npm run --silent app:install >> "$LOG" 2>&1 || stop "The Tweak icon could not be made."; fi
-wait $SHOT || echo "The picture taker did not download; Tweak tries again by itself." >> "$LOG"
 printf '{"step":5,"of":5,"pct":100,"label":"Tweak is open","open":true}\n' > "$PROG"
 echo "Tweak is installed and open."
 }
