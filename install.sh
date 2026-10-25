@@ -69,15 +69,23 @@ WIX=$(node -p "require('$HOME/Tweak/.signin.json').wixAccount")
 TOKEN=$(gh auth token --hostname github.com --user "$WIX" 2>/dev/null || gh auth token --hostname github.com)   # a GH_TOKEN sign-in has no name to ask by
 
 progress 3 25 "Getting Tweak"
+AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64)"
 if [ ! -d "$APP/.git" ]; then
-  git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64)" clone -q --branch "$APP_BRANCH" "$APP_URL" "$APP" >> "$LOG" 2>&1 \
+  git -c http.extraheader="$AUTH" clone -q --branch "$APP_BRANCH" "$APP_URL" "$APP" >> "$LOG" 2>&1 \
     || stop "Your account $WIX cannot open Tweak yet. Ask Ilya to invite your work email in Share this team, then paste the same line again."
+elif [ -z "$(git -C "$APP" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+  # Pasted again: bring this copy up to the newest Tweak, so a Tweak that could not open gets the fix
+  # (2026-10-25, Omer). Only a copy nobody changed, and only forward; otherwise it stays as it is.
+  git -C "$APP" -c http.extraheader="$AUTH" fetch -q origin "$APP_BRANCH" >> "$LOG" 2>&1 && git -C "$APP" merge -q --ff-only FETCH_HEAD >> "$LOG" 2>&1 \
+    || echo "This Tweak was not brought up to date; it opens as it is." >> "$LOG"
 fi
 cd "$APP" || stop "The Tweak folder is missing."
+LOCK_SUM=$(shasum -a 256 package-lock.json 2>/dev/null | cut -c1-16)
 
 progress 4 35 "Getting Tweak’s parts" "Under a gigabyte, once."
 until curl -s -o /dev/null --max-time 6 https://npm.dev.wixpress.com/; do progress 4 35 "Getting Tweak’s parts" "" true; sleep 5; done
-( npm ci --no-audit --no-fund >> "$LOG" 2>&1 ) & CI=$!
+if [ -d node_modules ] && [ "$(cat "$HOME/Tweak/.parts-sum" 2>/dev/null)" = "$LOCK_SUM" ]; then ( true ) & CI=$!   # the same parts as last time: nothing to download
+else ( npm ci --no-audit --no-fund >> "$LOG" 2>&1 && echo "$LOCK_SUM" > "$HOME/Tweak/.parts-sum" ) & CI=$!; fi
 p=35; while kill -0 $CI 2>/dev/null; do sleep 3; [ $p -lt 80 ] && p=$((p + 1)); progress 4 $p "Getting Tweak’s parts" "Under a gigabyte, once. $(ls node_modules 2>/dev/null | wc -l | tr -d ' ') parts so far."; done
 wait $CI || stop "Tweak’s parts did not download."
 ( npx --yes playwright-core install chromium-headless-shell >> "$LOG" 2>&1 ) & SHOT=$!
