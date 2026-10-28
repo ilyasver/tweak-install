@@ -3,7 +3,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/ilyasver/tweak-install/main/install.sh | bash
 # Public on purpose, and holds no Wix code. Before the sign-in: public tools only. After a sign-in
 # that found an active wix-private member: the private app and its packages (installer/test/order.test.sh).
-# The person watches one Tweak page in the browser (installer/page.mjs); Terminal only starts it.
+# The person watches one Tweak window (Chrome's app window, installer/page.mjs); Terminal only starts it.
 set -uo pipefail
 REF="${TWEAK_INSTALL_REF:-main}"
 RAW="https://raw.githubusercontent.com/ilyasver/tweak-install/$REF"
@@ -63,7 +63,7 @@ fi
 rm -f "$HOME/Tweak/.signin.json"
 nohup node "$DIR/page.mjs" >> "$LOG" 2>&1 < /dev/null &
 echo $! > "$PAGE_PID"
-echo "A Tweak page opened in your browser. Sign in there; this window can stay in the back."
+echo "A Tweak window opened. Sign in there; this window can stay in the back."
 for _ in $(seq 1 900); do [ -f "$HOME/Tweak/.signin.json" ] && break; sleep 2; done
 grep -q '"ok":true' "$HOME/Tweak/.signin.json" 2>/dev/null || stop "The sign-in did not finish within 30 minutes."
 WIX=$(node -p "require('$HOME/Tweak/.signin.json').wixAccount")
@@ -95,7 +95,7 @@ wait $CI || stop "Tweak’s parts did not download."
 nohup npx --yes playwright-core install chromium-headless-shell >> "$LOG" 2>&1 < /dev/null &
 
 progress 5 90 "Opening Tweak"
-# The icon only, no window and no Finder: the person's sign-in tab turns into Tweak (page.mjs).
+# The icon only, no window and no Finder: the person's sign-in window turns into Tweak (page.mjs).
 # Then Tweak starts in the background, the way its icon starts it.
 if [ -z "${TWEAK_INSTALL_NO_OPEN:-}" ]; then
 npm run --silent app:install -- --no-open >> "$LOG" 2>&1 || stop "The Tweak icon could not be made."
@@ -103,5 +103,6 @@ TWEAK_NO_BROWSER=1 /bin/sh scripts/app/open.sh --no-window >> "$LOG" 2>&1 || sto
 fi
 printf '{"step":5,"of":5,"pct":100,"label":"Tweak is open","open":true}\n' > "$PROG"
 echo "Tweak is installed and open."
+echo "To open Tweak later, press Cmd+Space and type Tweak, or find it in Launchpad."
 }
 main "$@"

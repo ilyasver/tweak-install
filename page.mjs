@@ -6,8 +6,10 @@
 //    moment gh prints it. That account must be an active member of wix-private, else nothing more
 //    is downloaded. Tweak's two repo invitations (the app and the teams) are accepted for them.
 // 2. Progress: the installer writes ~/Tweak/install-progress.json; this page draws it as a bar.
-// 3. Open: this same tab turns into Tweak once Tweak answers. No second window and no Finder
+// 3. Open: this same window turns into Tweak once Tweak answers. No second window and no Finder
 //    window (2026-10-28, Dolev: Finder came to the front, the Tweak window hid behind it).
+// The page is opened as Chrome's app window (open -na "Google Chrome" --args --app=<url>), never a
+// tab, so the whole install looks like one app. Only GitHub's own page opens as a normal tab.
 // Every failure names the next step. Node built-ins only: this runs before anything is installed.
 // Public on purpose: no Wix code here.
 import http from 'node:http';
@@ -22,6 +24,10 @@ export const CODE_RE = /[A-Z0-9]{4}-[A-Z0-9]{4}/;
 const PORT = 5169;
 const TWEAK_PORT = 5170;
 export const TWEAK_URL = `http://tweak.localhost:${TWEAK_PORT}/`;
+/** Where this window moves to. ?from=installer tells Tweak this window is the installer's, so it
+ *  offers the Dock install here instead of taking the window for the finished app (InstallGate). */
+export const MOVE_URL = `${TWEAK_URL}?from=installer`;
+export const GITHUB_URL = 'https://github.com/login/device';
 const HOME = os.homedir();
 const SIGNIN_FILE = path.join(HOME, 'Tweak', '.signin.json');
 const PROGRESS_FILE = path.join(HOME, 'Tweak', 'install-progress.json');
@@ -41,8 +47,9 @@ const W = {
   welcome: 'Welcome, {login}',
   vpn: 'Connect to the Wix VPN. Tweak carries on by itself once it is on.',
   starting: 'Starting Tweak…',
-  openHere: 'Tweak opens in this tab. If it does not, press Open Tweak.',
+  openHere: 'Tweak opens in this window. If it does not, press Open Tweak.',
   openButton: 'Open Tweak',
+  later: 'To open Tweak later, press Cmd+Space and type Tweak, or find it in Launchpad.',
 };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -54,6 +61,19 @@ const ghRun = (args, { input, env = process.env, onData } = {}) => new Promise((
   if (input !== undefined) { child.stdin.write(input); child.stdin.end(); }
   child.on('close', (code) => resolve({ ok: code === 0, out }));
 });
+
+/** The commands that open this page: Chrome's app window first, then a Chrome tab, then the
+ *  default browser. Each is tried only when the one before it failed. */
+export const windowAttempts = (url) => [['-na', 'Google Chrome', '--args', `--app=${url}`], ['-a', 'Google Chrome', url], [url]];
+export function openInstallerWindow(url, run = (args, cb) => execFile('open', args, cb)) {
+  const tries = windowAttempts(url);
+  const go = (i) => { if (i < tries.length) run(tries[i], (e) => { if (e) go(i + 1); }); };
+  go(0);
+}
+/** GitHub's own device page: a normal Chrome tab (an app window would make it a pop-up), else the default browser. */
+export function openTab(url, run = (args, cb) => execFile('open', args, cb)) {
+  run(['-a', 'Google Chrome', url], (e) => { if (e) run([url], () => {}); });
+}
 
 export function readProgress(file = PROGRESS_FILE) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } }
 
@@ -133,15 +153,15 @@ export function pageHtml(state) {
   if (state.phase === 'code') {
     body = state.code
       ? `<h1>${W.title}</h1><p class="lede">${W.line}</p><p class="code" aria-label="Your one-time code">${esc(state.code)}</p>
-         <button type="button" onclick="navigator.clipboard.writeText('${esc(state.code)}');window.open('https://github.com/login/device','_blank');this.textContent='${esc(W.copied)}'">${W.copyOpen}</button><p class="hint">${W.hint}</p>${note('clock', W.waitingAuth)}`
+         <button type="button" onclick="navigator.clipboard.writeText('${esc(state.code)}');fetch('/github',{method:'POST'});this.textContent='${esc(W.copied)}'">${W.copyOpen}</button><p class="hint">${W.hint}</p>${note('clock', W.waitingAuth)}`
       : `<h1>${W.title}</h1>${note('clock', W.waiting)}`;
   } else if (state.phase === 'failed') {
     body = `<h1>${W.title}</h1>${note('warning', esc(state.sentence))}<div class="again"><button type="button" onclick="fetch('/again',{method:'POST'}).then(()=>location.reload())">${W.again}</button></div>`;
   } else {
     const title = state.login ? W.welcome.replace('{login}', esc(state.login)) : 'Tweak';
     at = 2;
-    if (p?.open && state.tweakUp) { at = 3; body = `<h1>${title}</h1>${note('check', W.openHere)}<div class="again"><a class="button" href="${TWEAK_URL}">${W.openButton}</a></div><script>location.replace(${JSON.stringify(TWEAK_URL)})</script>`; }
-    else if (p?.open) { at = 3; body = `<h1>${title}</h1>${note('clock', W.starting)}`; }
+    if (p?.open && state.tweakUp) { at = 3; body = `<h1>${title}</h1>${note('check', W.openHere)}<div class="again"><a class="button" href="${MOVE_URL}">${W.openButton}</a></div><p class="hint">${W.later}</p><script>location.replace(${JSON.stringify(MOVE_URL)})</script>`; }
+    else if (p?.open) { at = 3; body = `<h1>${title}</h1>${note('clock', W.starting)}<p class="hint">${W.later}</p>`; }
     else if (p?.failed) body = `<h1>${title}</h1>${note('warning', esc(p.failed))}<p class="hint">${esc(p.next ?? '')}</p>`;
     else body = `<h1>${title}</h1>
       <p class="step">${esc(p?.step ?? 1)} of ${esc(p?.of ?? 5)} · ${esc(p?.label ?? 'Getting ready')}</p>
@@ -159,7 +179,7 @@ export function pageHtml(state) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let state = { phase: 'code', code: '' };
-  /* Whether Tweak answers yet: the tab moves to Tweak only then, so it never lands on an error page. */
+  /* Whether Tweak answers yet: the window moves to Tweak only then, so it never lands on an error page. */
   let tweakUp = false;
   setInterval(() => {
     const r = http.get({ host: '127.0.0.1', port: TWEAK_PORT, path: '/__launcher/status', timeout: 1000 }, (res) => { tweakUp = res.statusCode === 200; res.resume(); });
@@ -168,9 +188,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const current = () => (state.phase === 'progress' ? { ...state, progress: readProgress(), tweakUp } : state);
   const server = http.createServer((req, res) => {
     if (req.url === '/state') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(current())); return; }
+    if (req.url === '/github' && req.method === 'POST') { openTab(GITHUB_URL); res.end('{}'); return; }
     if (req.url === '/again' && req.method === 'POST') { state = { phase: 'code', code: '' }; void run({ tryAlready: false }); res.end('{}'); return; }
     res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(pageHtml(current()));
-  }).listen(PORT, '127.0.0.1', () => { const here = `http://127.0.0.1:${PORT}`; execFile('open', ['-a', 'Google Chrome', here], (e) => { if (e) execFile('open', [here]); }); void run({ tryAlready: true }); });
+  }).listen(PORT, '127.0.0.1', () => { openInstallerWindow(`http://127.0.0.1:${PORT}`); void run({ tryAlready: true }); });
   async function run({ tryAlready }) {
     fs.rmSync(SIGNIN_FILE, { force: true });
     const onCode = (code) => { state = { phase: 'code', code }; };
