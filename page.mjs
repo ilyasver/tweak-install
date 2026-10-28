@@ -6,7 +6,8 @@
 //    moment gh prints it. That account must be an active member of wix-private, else nothing more
 //    is downloaded. Tweak's two repo invitations (the app and the teams) are accepted for them.
 // 2. Progress: the installer writes ~/Tweak/install-progress.json; this page draws it as a bar.
-// 3. Open: Tweak opens in its own window on its teams step; this page says so and stops.
+// 3. Open: this same tab turns into Tweak once Tweak answers. No second window and no Finder
+//    window (2026-10-28, Dolev: Finder came to the front, the Tweak window hid behind it).
 // Every failure names the next step. Node built-ins only: this runs before anything is installed.
 // Public on purpose: no Wix code here.
 import http from 'node:http';
@@ -19,6 +20,8 @@ import { fileURLToPath } from 'node:url';
 export const TWEAK_REPOS = ['ilyasver/tweak-app', 'ilyasver/tweak-teams'];
 export const CODE_RE = /[A-Z0-9]{4}-[A-Z0-9]{4}/;
 const PORT = 5169;
+const TWEAK_PORT = 5170;
+export const TWEAK_URL = `http://tweak.localhost:${TWEAK_PORT}/`;
 const HOME = os.homedir();
 const SIGNIN_FILE = path.join(HOME, 'Tweak', '.signin.json');
 const PROGRESS_FILE = path.join(HOME, 'Tweak', 'install-progress.json');
@@ -37,7 +40,9 @@ const W = {
   again: 'Sign in again',
   welcome: 'Welcome, {login}',
   vpn: 'Connect to the Wix VPN. Tweak carries on by itself once it is on.',
-  open: 'Tweak is open in its own window. Press Install Tweak there, then choose your team.',
+  starting: 'Starting Tweak…',
+  openHere: 'Tweak opens in this tab. If it does not, press Open Tweak.',
+  openButton: 'Open Tweak',
 };
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -116,8 +121,8 @@ h1{margin:0 0 12px;font:700 40px/1.05 "Funnel Display","Helvetica Neue",Helvetic
 progress{display:block;width:100%;height:6px;border:0;border-radius:999px;overflow:hidden;appearance:none;-webkit-appearance:none;background:var(--line);color:var(--ink)}
 progress::-webkit-progress-bar{background:var(--line);border-radius:999px}progress::-webkit-progress-value{background:var(--ink);border-radius:999px}progress::-moz-progress-bar{background:var(--ink);border-radius:999px}
 .again{margin-top:20px}
-button{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:52px;padding:8px 20px;border:0;border-radius:14px;background:var(--ink);color:#fff;font:500 14px/20px "Geist Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;cursor:pointer;transition:background-color .16s ease}
-button:hover{background:#45464A}button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+button,.button{display:inline-flex;text-decoration:none;align-items:center;justify-content:center;width:100%;min-height:52px;padding:8px 20px;border:0;border-radius:14px;background:var(--ink);color:#fff;font:500 14px/20px "Geist Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;cursor:pointer;transition:background-color .16s ease}
+button:hover,.button:hover{background:#45464A}button:focus-visible,.button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 @media(max-width:759px){main{grid-template-columns:1fr;min-height:0}.brand{min-height:0;padding:20px 24px}.mark{flex:none}.mark svg{height:32px;width:auto}.promise{display:none}.side{padding:32px 24px}.code{font-size:34px}h1{font-size:34px}}
 @media(prefers-reduced-motion:reduce){button{transition:none}}`;
 
@@ -135,7 +140,8 @@ export function pageHtml(state) {
   } else {
     const title = state.login ? W.welcome.replace('{login}', esc(state.login)) : 'Tweak';
     at = 2;
-    if (p?.open) { at = 3; body = `<h1>${title}</h1>${note('check', W.open)}`; }
+    if (p?.open && state.tweakUp) { at = 3; body = `<h1>${title}</h1>${note('check', W.openHere)}<div class="again"><a class="button" href="${TWEAK_URL}">${W.openButton}</a></div><script>location.replace(${JSON.stringify(TWEAK_URL)})</script>`; }
+    else if (p?.open) { at = 3; body = `<h1>${title}</h1>${note('clock', W.starting)}`; }
     else if (p?.failed) body = `<h1>${title}</h1>${note('warning', esc(p.failed))}<p class="hint">${esc(p.next ?? '')}</p>`;
     else body = `<h1>${title}</h1>
       <p class="step">${esc(p?.step ?? 1)} of ${esc(p?.of ?? 5)} · ${esc(p?.label ?? 'Getting ready')}</p>
@@ -153,12 +159,18 @@ export function pageHtml(state) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let state = { phase: 'code', code: '' };
-  const current = () => (state.phase === 'progress' ? { ...state, progress: readProgress() } : state);
+  /* Whether Tweak answers yet: the tab moves to Tweak only then, so it never lands on an error page. */
+  let tweakUp = false;
+  setInterval(() => {
+    const r = http.get({ host: '127.0.0.1', port: TWEAK_PORT, path: '/__launcher/status', timeout: 1000 }, (res) => { tweakUp = res.statusCode === 200; res.resume(); });
+    r.on('error', () => { tweakUp = false; }); r.on('timeout', () => r.destroy());
+  }, 1000);
+  const current = () => (state.phase === 'progress' ? { ...state, progress: readProgress(), tweakUp } : state);
   const server = http.createServer((req, res) => {
     if (req.url === '/state') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(current())); return; }
     if (req.url === '/again' && req.method === 'POST') { state = { phase: 'code', code: '' }; void run({ tryAlready: false }); res.end('{}'); return; }
     res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(pageHtml(current()));
-  }).listen(PORT, '127.0.0.1', () => { execFile('open', [`http://127.0.0.1:${PORT}`]); void run({ tryAlready: true }); });
+  }).listen(PORT, '127.0.0.1', () => { const here = `http://127.0.0.1:${PORT}`; execFile('open', ['-a', 'Google Chrome', here], (e) => { if (e) execFile('open', [here]); }); void run({ tryAlready: true }); });
   async function run({ tryAlready }) {
     fs.rmSync(SIGNIN_FILE, { force: true });
     const onCode = (code) => { state = { phase: 'code', code }; };
@@ -171,8 +183,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     fs.mkdirSync(path.dirname(SIGNIN_FILE), { recursive: true });
     fs.writeFileSync(SIGNIN_FILE, JSON.stringify(r), { mode: 0o600 });
   }
-  /* Stop a minute after Tweak opened, or after an hour whatever happens. */
-  setInterval(() => { if (readProgress()?.open) setTimeout(() => process.exit(0), 60_000); }, 5000);
+  /* Stop a minute after Tweak answered, or after an hour whatever happens. */
+  setInterval(() => { if (readProgress()?.open && tweakUp) setTimeout(() => process.exit(0), 60_000); }, 5000);
   setTimeout(() => process.exit(0), 3_600_000);
   process.on('SIGTERM', () => { server.close(); process.exit(0); });
 }

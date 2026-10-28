@@ -94,7 +94,12 @@ wait $CI || stop "Tweak’s parts did not download."
 nohup npx --yes playwright-core install chromium-headless-shell >> "$LOG" 2>&1 < /dev/null &
 
 progress 5 90 "Opening Tweak"
-if [ -z "${TWEAK_INSTALL_NO_OPEN:-}" ]; then npm run --silent app:install >> "$LOG" 2>&1 || stop "The Tweak icon could not be made."; fi
+# The icon only, no window and no Finder: the person's sign-in tab turns into Tweak (page.mjs).
+# Then Tweak starts in the background, the way its icon starts it.
+if [ -z "${TWEAK_INSTALL_NO_OPEN:-}" ]; then
+npm run --silent app:install -- --no-open >> "$LOG" 2>&1 || stop "The Tweak icon could not be made."
+TWEAK_NO_BROWSER=1 /bin/sh scripts/app/open.sh --no-window >> "$LOG" 2>&1 || stop "Tweak did not start."
+fi
 printf '{"step":5,"of":5,"pct":100,"label":"Tweak is open","open":true}\n' > "$PROG"
 echo "Tweak is installed and open."
 }
