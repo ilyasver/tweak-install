@@ -49,6 +49,7 @@ progress 1 5 "Getting the tools" "$VPN_NOTE"
 ensure_node >> "$LOG" 2>&1 || stop "Node did not download."
 ensure_gh >> "$LOG" 2>&1 || stop "GitHub's tool did not download."
 ensure_git >> "$LOG" 2>&1 || stop "git did not download."
+ensure_pm >> "$LOG" 2>&1 || true   # a project can still install without them (package-manager.mjs makes them too)
 
 progress 2 15 "Sign in" "$VPN_NOTE"
 # Stop an older page from an earlier run, and only that: by the process number it wrote, and only

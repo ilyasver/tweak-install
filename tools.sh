@@ -25,6 +25,16 @@ ensure_node() {
   tar -xzf "$f" && ln -sfn "${f%.tar.gz}" node && rm "$f"
 }
 
+# pnpm and yarn as plain commands, from the corepack inside Tweak's own Node: a project's build that calls
+# `pnpm` by name inside itself needs it on PATH (2026-10-28, Symphony's common-lib on Dolev's Mac).
+# Only for Tweak's own Node; a person's own Node is left as it is.
+ensure_pm() {
+  local cp="$TOOLS/node/bin/corepack"
+  [ -x "$cp" ] || return 0
+  [ -e "$TOOLS/node/bin/pnpm" ] && [ -e "$TOOLS/node/bin/yarn" ] && return 0
+  "$cp" enable pnpm yarn
+}
+
 ensure_gh() {
   if command -v gh >/dev/null && gh --version | head -1 | awk '{split($3,v,"."); exit !(v[1]>2 || (v[1]==2 && v[2]>=40))}'; then return 0; fi
   [ -n "${TWEAK_FAKE_DOWNLOAD:-}" ] && { _fake gh; return 0; }
