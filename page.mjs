@@ -75,6 +75,13 @@ export function openTab(url, run = (args, cb) => execFile('open', args, cb)) {
   run(['-a', 'Google Chrome', url], (e) => { if (e) run([url], () => {}); });
 }
 
+/* Whether Tweak itself can be shown, from the launcher's status answer. The launcher answers 200 while
+   the server behind it is still starting, so only its own word counts: phase "ready", or "other"
+   (Tweak already served by another copy). Anything unreadable is not ready. */
+export function tweakReady(statusCode, bodyText) {
+  if (statusCode !== 200) return false;
+  try { const s = JSON.parse(String(bodyText ?? '')); return s?.phase === 'ready' || (s?.phase === 'other' && Boolean(s?.other)); } catch { return false; }
+}
 export function readProgress(file = PROGRESS_FILE) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } }
 
 /** Sign in (unless `already`), find the Wix account, accept Tweak's invitations. */
@@ -168,11 +175,13 @@ export function pageHtml(state) {
       <progress value="${esc(p?.pct ?? 0)}" max="100" aria-label="${esc(p?.label ?? 'Getting ready')}"></progress>
       ${p?.vpn ? note('warning', W.vpn) : `<p class="hint" aria-live="polite">${esc(p?.line ?? '')}</p>`}`;
   }
+  /* A change swaps only the steps column in place (2026-10-29 rehearsal): a whole-page reload every few seconds re-fetched the
+     fonts and flashed the window. A script in the new column (the move to Tweak) is run by hand, since swapped-in scripts never run. */
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Tweak</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@300..800&family=Funnel+Sans:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
 <style>${CSS}</style>
-<script>const last=${JSON.stringify(JSON.stringify(state))};setInterval(()=>fetch("/state").then(r=>r.text()).then(t=>{if(t!==last)location.reload()}).catch(()=>{}),1200)</script>
+<script>let last=${JSON.stringify(JSON.stringify(state))};setInterval(()=>fetch("/state").then(r=>r.text()).then(t=>{if(t===last)return;last=t;return fetch("/").then(r=>r.text()).then(h=>{const d=new DOMParser().parseFromString(h,"text/html"),n=d.querySelector(".col"),o=document.querySelector(".col");if(!n||!o)return location.assign("/");o.replaceWith(n);n.querySelectorAll("script").forEach(s=>new Function(s.textContent)())})}).catch(()=>{}),1200)</script>
 </head><body><main><div class="brand"><div class="art" aria-hidden="true"></div><div class="mark">${WORDMARK(56)}</div><p class="promise">${W.promise}</p></div>
 <div class="side"><div class="col">${dots(at)}${body}</div></div></main></body></html>`;
 }
@@ -182,7 +191,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   /* Whether Tweak answers yet: the window moves to Tweak only then, so it never lands on an error page. */
   let tweakUp = false;
   setInterval(() => {
-    const r = http.get({ host: '127.0.0.1', port: TWEAK_PORT, path: '/__launcher/status', timeout: 1000 }, (res) => { tweakUp = res.statusCode === 200; res.resume(); });
+    const r = http.get({ host: '127.0.0.1', port: TWEAK_PORT, path: '/__launcher/status', timeout: 1000 }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => { tweakUp = tweakReady(res.statusCode, body); });
+    });
     r.on('error', () => { tweakUp = false; }); r.on('timeout', () => r.destroy());
   }, 1000);
   const current = () => (state.phase === 'progress' ? { ...state, progress: readProgress(), tweakUp } : state);
@@ -204,8 +217,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     fs.mkdirSync(path.dirname(SIGNIN_FILE), { recursive: true });
     fs.writeFileSync(SIGNIN_FILE, JSON.stringify(r), { mode: 0o600 });
   }
-  /* Stop a minute after Tweak answered, or after an hour whatever happens. */
+  /* Stop a minute after Tweak answered. After an hour it stops only once the install has gone quiet for 15 minutes
+     (2026-10-29 council: a slow sign-in plus a slow install closed the window mid-install). */
   setInterval(() => { if (readProgress()?.open && tweakUp) setTimeout(() => process.exit(0), 60_000); }, 5000);
-  setTimeout(() => process.exit(0), 3_600_000);
+  const started = Date.now();
+  setInterval(() => { let moved = 0; try { moved = fs.statSync(PROGRESS_FILE).mtimeMs; } catch { /* no install yet */ } if (Date.now() - started > 3_600_000 && Date.now() - moved > 15 * 60_000) process.exit(0); }, 60_000);
   process.on('SIGTERM', () => { server.close(); process.exit(0); });
 }
