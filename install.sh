@@ -83,11 +83,11 @@ fi
 cd "$APP" || stop "The Tweak folder is missing."
 LOCK_SUM=$(shasum -a 256 package-lock.json 2>/dev/null | cut -c1-16)
 
-progress 4 35 "Getting Tweak’s parts" "Under a gigabyte, once."
+progress 4 35 "Getting Tweak’s parts" "About 4 GB, once."
 until curl -s -o /dev/null --max-time 6 https://npm.dev.wixpress.com/; do progress 4 35 "Getting Tweak’s parts" "" true; sleep 5; done
 if [ -d node_modules ] && [ "$(cat "$HOME/Tweak/.parts-sum" 2>/dev/null)" = "$LOCK_SUM" ]; then ( true ) & CI=$!   # the same parts as last time: nothing to download
 else ( npm ci --no-audit --no-fund >> "$LOG" 2>&1 && echo "$LOCK_SUM" > "$HOME/Tweak/.parts-sum" ) & CI=$!; fi
-p=35; while kill -0 $CI 2>/dev/null; do sleep 3; [ $p -lt 80 ] && p=$((p + 1)); progress 4 $p "Getting Tweak’s parts" "Under a gigabyte, once. $(ls node_modules 2>/dev/null | wc -l | tr -d ' ') parts so far."; done
+p=35; while kill -0 $CI 2>/dev/null; do sleep 3; [ $p -lt 80 ] && p=$((p + 1)); progress 4 $p "Getting Tweak’s parts" "About 4 GB, once. $(ls node_modules 2>/dev/null | wc -l | tr -d ' ') parts so far."; done
 wait $CI || stop "Tweak’s parts did not download."
 # The camera's own Chrome (about 100 MB) is optional: without it the camera borrows the person's Chrome.
 # It keeps downloading after this script ends and is never waited on: on the Wix VPN it can stall, and an
