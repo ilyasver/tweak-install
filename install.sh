@@ -7,8 +7,8 @@
 set -uo pipefail
 REF="${TWEAK_INSTALL_REF:-main}"
 RAW="https://raw.githubusercontent.com/ilyasver/tweak-install/$REF"
-APP_URL="${TWEAK_APP_URL:-https://github.com/ilyasver/tweak-app.git}"
-APP_BRANCH="${TWEAK_APP_BRANCH:-}"   # empty: the repo's own default branch (main today, master once it moves to wix-private)
+APP_URL="${TWEAK_APP_URL:-https://github.com/wix-private/tweak-app.git}"
+APP_BRANCH="${TWEAK_APP_BRANCH:-}"   # empty: the repo's own default branch (master)
 APP="$HOME/Tweak/tweak-app"
 DIR="$HOME/Tweak/installer"
 PROG="$HOME/Tweak/install-progress.json"
