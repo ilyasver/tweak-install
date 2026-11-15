@@ -48,7 +48,10 @@ report_stop() { # reason
   if [ -n "${NODE_OK:-}" ]; then tell "install failed" step="${STEP:-checks}" reason="$1" log="$LOG" from="${LOG_AT:-0}"
   else tell_early "${STEP:-checks}" "$1"; fi
 }
-step() { # [name]
+on_signal() { # signal: Terminal closed or Ctrl+C. Report the step it stopped in, then end by that same signal, as before
+  report_stop stopped; trap - "$1"; kill -s "$1" $$
+}
+step() { # [name] (checks and download run before Node is here: they report a stop, never a time)
   [ -n "${STEP:-}" ] && tell "install step" step="$STEP" ms="$(( (SECONDS - STEP_AT) * 1000 ))" $STEP_NOTE
   STEP="${1:-}"; STEP_NOTE=""; STEP_AT=$SECONDS; LOG_AT=$(stat -f %z "$LOG" 2>/dev/null || echo 0)
 }
@@ -67,7 +70,7 @@ else TELL=installer; fi
 case "${TWEAK_TELEMETRY:-}" in 0|off|false|no) TELL="";; esac
 export TWEAK_INSTALL_CHANNEL="$TELL" TWEAK_INSTALL_ID="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')" TWEAK_INSTALL_STARTED="$(date +%s)000"
 NODE_OK=""; STEP=""; STEP_NOTE=""; STEP_AT=$SECONDS; LOG_AT=0
-trap 'report_stop stopped; exit 1' HUP INT TERM   # Terminal closed or Ctrl+C: the step it stopped in
+trap 'on_signal HUP' HUP; trap 'on_signal INT' INT; trap 'on_signal TERM' TERM
 step checks
 
 [ "$(uname)" = Darwin ] || stop "Tweak runs on a Mac." not-mac
@@ -80,7 +83,7 @@ if [ ! -d "/Applications/Google Chrome.app" ] && [ ! -d "$HOME/Applications/Goog
 step download
 rm -f "$DIR/telemetry.mjs"
 if [ -n "${TWEAK_INSTALL_LOCAL:-}" ]; then cp "$TWEAK_INSTALL_LOCAL"/tools.sh "$TWEAK_INSTALL_LOCAL"/page.mjs "$DIR/"; cp "$TWEAK_INSTALL_LOCAL"/telemetry.mjs "$DIR/" 2>/dev/null
-else [ -n "$TELL" ] && ( curl -fsSLo "$DIR/telemetry.mjs.part" --max-time 20 "$RAW/telemetry.mjs" && mv "$DIR/telemetry.mjs.part" "$DIR/telemetry.mjs" ) < /dev/null > /dev/null 2>&1 &
+else if [ -n "$TELL" ]; then ( curl -fsSLo "$DIR/telemetry.mjs.part" --max-time 20 "$RAW/telemetry.mjs" && mv "$DIR/telemetry.mjs.part" "$DIR/telemetry.mjs" ) < /dev/null > /dev/null 2>&1 & fi
   for f in tools.sh page.mjs; do curl -fsSLo "$DIR/$f" "$RAW/$f" || stop "Could not download the installer. Check the internet connection." no-network; done; fi
 source "$DIR/tools.sh"
 

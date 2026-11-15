@@ -194,16 +194,17 @@ export const READY_LIMIT_MS = 10 * 60_000;
 /**
  * The end of an install, as the installer's reports say it: "finished" the first time Tweak answers after the last
  * step, with the wait for it as the "ready" step; "failed" at "ready" when it has not answered within READY_LIMIT_MS,
- * with the launcher's last phase and failure word. Each is said once. Pure: `tell(name, fields)` sends.
+ * with the launcher's last phase and failure word. Each is said once. `failAtReady` false: an install that never starts
+ * Tweak (TWEAK_INSTALL_NO_OPEN, a lab) is never called failed for it. Pure: `tell(name, fields)` sends.
  */
-export function installEnd(tell, now = () => Date.now()) {
+export function installEnd(tell, now = () => Date.now(), { failAtReady = true } = {}) {
   let openAt = null;
   let said = false;
   return ({ open, up, phase, failure }) => {
     if (said || !open) return;
     openAt ??= now();
     if (up) { said = true; tell('install step', { step: 'ready', ms: now() - openAt }); tell('install finished', {}); }
-    else if (now() - openAt > READY_LIMIT_MS) { said = true; tell('install failed', { step: 'ready', ...(phase ? { phase } : {}), ...(failure ? { reason: failure } : {}) }); }
+    else if (failAtReady && now() - openAt > READY_LIMIT_MS) { said = true; tell('install failed', { step: 'ready', ...(phase ? { phase } : {}), ...(failure ? { reason: failure } : {}) }); }
   };
 }
 
@@ -213,7 +214,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
      awaited; never throws. */
   let sender;
   const tell = (name, fields) => { void (sender ??= import('./telemetry.mjs').catch(() => { sender = undefined; return null; })).then((m) => m?.tellInstall(name, fields)).catch(() => {}); };
-  const endOfInstall = installEnd(tell);
+  const endOfInstall = installEnd(tell, undefined, { failAtReady: !process.env.TWEAK_INSTALL_NO_OPEN });
   let state = { phase: 'code', code: '' };
   /* Whether Tweak answers yet: the window moves to Tweak only then, so it never lands on an error page. */
   let tweakUp = false;
