@@ -186,17 +186,50 @@ export function pageHtml(state) {
 <div class="side"><div class="col">${dots(at)}${body}</div></div></main></body></html>`;
 }
 
+/** Why a sign-in was refused, as a word for the installer's report (never the person's account). */
+export const signinRefusal = (sentence) => ({ [W.notDone]: 'not-finished', [W.notWix]: 'not-wix', [W.sso]: 'sso' }[sentence] ?? 'other');
+/** How long Tweak may take to answer after the install's last step before the install counts as failed at "ready". */
+export const READY_LIMIT_MS = 10 * 60_000;
+
+/**
+ * The end of an install, as the installer's reports say it: "finished" the first time Tweak answers after the last
+ * step, with the wait for it as the "ready" step; "failed" at "ready" when it has not answered within READY_LIMIT_MS,
+ * with the launcher's last phase and failure word. Each is said once. `failAtReady` false: an install that never starts
+ * Tweak (TWEAK_INSTALL_NO_OPEN, a lab) is never called failed for it. Pure: `tell(name, fields)` sends.
+ */
+export function installEnd(tell, now = () => Date.now(), { failAtReady = true } = {}) {
+  let openAt = null;
+  let said = false;
+  return ({ open, up, phase, failure }) => {
+    if (said || !open) return;
+    openAt ??= now();
+    if (up) { said = true; tell('install step', { step: 'ready', ms: now() - openAt }); tell('install finished', {}); }
+    else if (failAtReady && now() - openAt > READY_LIMIT_MS) { said = true; tell('install failed', { step: 'ready', ...(phase ? { phase } : {}), ...(failure ? { reason: failure } : {}) }); }
+  };
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  /* The installer's reports (installer/telemetry.mjs), loaded on the first report and again later while it is missing:
+     install.sh downloads it in the background, and a page from an install.sh that never does still runs. Never
+     awaited; never throws. */
+  let sender;
+  const tell = (name, fields) => { void (sender ??= import('./telemetry.mjs').catch(() => { sender = undefined; return null; })).then((m) => m?.tellInstall(name, fields)).catch(() => {}); };
+  const endOfInstall = installEnd(tell, undefined, { failAtReady: !process.env.TWEAK_INSTALL_NO_OPEN });
   let state = { phase: 'code', code: '' };
   /* Whether Tweak answers yet: the window moves to Tweak only then, so it never lands on an error page. */
   let tweakUp = false;
+  let launcher = {};
   setInterval(() => {
     const r = http.get({ host: '127.0.0.1', port: TWEAK_PORT, path: '/__launcher/status', timeout: 1000 }, (res) => {
       let body = '';
       res.on('data', (c) => { body += c; });
-      res.on('end', () => { tweakUp = tweakReady(res.statusCode, body); });
+      res.on('end', () => {
+        tweakUp = tweakReady(res.statusCode, body);
+        try { const j = JSON.parse(body); launcher = { phase: typeof j?.phase === 'string' ? j.phase : null, failure: typeof j?.failure === 'string' ? j.failure : null }; } catch { /* not the launcher */ }
+      });
     });
     r.on('error', () => { tweakUp = false; }); r.on('timeout', () => r.destroy());
+    endOfInstall({ open: Boolean(readProgress()?.open), up: tweakUp, ...launcher });
   }, 1000);
   const current = () => (state.phase === 'progress' ? { ...state, progress: readProgress(), tweakUp } : state);
   const server = http.createServer((req, res) => {
@@ -204,7 +237,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (req.url === '/github' && req.method === 'POST') { openTab(GITHUB_URL); res.end('{}'); return; }
     if (req.url === '/again' && req.method === 'POST') { state = { phase: 'code', code: '' }; void run({ tryAlready: false }); res.end('{}'); return; }
     res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(pageHtml(current()));
-  }).listen(PORT, '127.0.0.1', () => { openInstallerWindow(`http://127.0.0.1:${PORT}`); void run({ tryAlready: true }); });
+  }).listen(PORT, '127.0.0.1', () => { if (!process.env.TWEAK_INSTALL_NO_WINDOW) openInstallerWindow(`http://127.0.0.1:${PORT}`); void run({ tryAlready: true }); });
   async function run({ tryAlready }) {
     fs.rmSync(SIGNIN_FILE, { force: true });
     const onCode = (code) => { state = { phase: 'code', code }; };
@@ -212,7 +245,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
        member. Use that and skip GitHub's device sign-in. "Sign in again" always runs the full one. */
     let r = tryAlready ? await signinSteps({ already: true, onCode }) : { ok: false };
     if (!r.ok) r = await signinSteps({ onCode });
-    if (!r.ok) { state = { phase: 'failed', sentence: r.sentence }; return; }
+    if (!r.ok) { state = { phase: 'failed', sentence: r.sentence }; tell('install signin refused', { reason: signinRefusal(r.sentence) }); return; }
     state = { phase: 'progress', login: r.wixAccount };
     fs.mkdirSync(path.dirname(SIGNIN_FILE), { recursive: true });
     fs.writeFileSync(SIGNIN_FILE, JSON.stringify(r), { mode: 0o600 });
