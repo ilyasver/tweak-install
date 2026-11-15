@@ -19,7 +19,7 @@ import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const TWEAK_REPOS = ['ilyasver/tweak-app', 'ilyasver/tweak-teams'];
+export const TWEAK_REPOS = ['wix-private/tweak-app', 'ilyasver/tweak-teams'];
 export const CODE_RE = /[A-Z0-9]{4}-[A-Z0-9]{4}/;
 const PORT = 5169;
 const TWEAK_PORT = 5170;
