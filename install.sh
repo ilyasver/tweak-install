@@ -8,7 +8,7 @@ set -uo pipefail
 REF="${TWEAK_INSTALL_REF:-main}"
 RAW="https://raw.githubusercontent.com/ilyasver/tweak-install/$REF"
 APP_URL="${TWEAK_APP_URL:-https://github.com/ilyasver/tweak-app.git}"
-APP_BRANCH="${TWEAK_APP_BRANCH:-main}"
+APP_BRANCH="${TWEAK_APP_BRANCH:-}"   # empty: the repo's own default branch (main today, master once it moves to wix-private)
 APP="$HOME/Tweak/tweak-app"
 DIR="$HOME/Tweak/installer"
 PROG="$HOME/Tweak/install-progress.json"
@@ -42,8 +42,9 @@ else for f in tools.sh page.mjs; do curl -fsSLo "$DIR/$f" "$RAW/$f" || stop "Cou
 source "$DIR/tools.sh"
 
 # A check only, nothing downloaded: say early that the VPN will be needed.
+REG="${TWEAK_REGISTRY_URL:-https://npm.dev.wixpress.com/}"
 VPN_NOTE=""
-[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 https://npm.dev.wixpress.com/ 2>/dev/null | cut -c1)" = 2 ] || VPN_NOTE="Turn on the Wix VPN now. Tweak needs it in a few minutes."
+[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 "$REG" 2>/dev/null | cut -c1)" = 2 ] || VPN_NOTE="Turn on the Wix VPN now. Tweak needs it in a few minutes."
 
 progress 1 5 "Getting the tools" "$VPN_NOTE"
 ensure_node >> "$LOG" 2>&1 || stop "Node did not download."
@@ -72,19 +73,23 @@ TOKEN=$(gh auth token --hostname github.com --user "$WIX" 2>/dev/null || gh auth
 progress 3 25 "Getting Tweak"
 AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64)"
 if [ ! -d "$APP/.git" ]; then
-  git -c http.extraheader="$AUTH" clone -q --branch "$APP_BRANCH" "$APP_URL" "$APP" >> "$LOG" 2>&1 \
+  git -c http.extraheader="$AUTH" clone -q ${APP_BRANCH:+--branch "$APP_BRANCH"} "$APP_URL" "$APP" >> "$LOG" 2>&1 \
     || stop "Your account $WIX cannot open Tweak yet. Ask Ilya to invite your work email in Share this team, then paste the same line again."
 elif [ -z "$(git -C "$APP" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
   # Pasted again: bring this copy up to the newest Tweak, so a Tweak that could not open gets the fix
   # (2026-10-25, Omer). Only a copy nobody changed, and only forward; otherwise it stays as it is.
-  git -C "$APP" -c http.extraheader="$AUTH" fetch -q origin "$APP_BRANCH" >> "$LOG" 2>&1 && git -C "$APP" merge -q --ff-only FETCH_HEAD >> "$LOG" 2>&1 \
+  git -C "$APP" -c http.extraheader="$AUTH" fetch -q origin "${APP_BRANCH:-HEAD}" >> "$LOG" 2>&1 && git -C "$APP" merge -q --ff-only FETCH_HEAD >> "$LOG" 2>&1 \
     || echo "This Tweak was not brought up to date; it opens as it is." >> "$LOG"
 fi
 cd "$APP" || stop "The Tweak folder is missing."
 LOCK_SUM=$(shasum -a 256 package-lock.json 2>/dev/null | cut -c1-16)
 
 progress 4 35 "Getting Tweak’s parts" "About 4 GB, once."
-until curl -s -o /dev/null --max-time 6 https://npm.dev.wixpress.com/; do progress 4 35 "Getting Tweak’s parts" "" true; sleep 5; done
+WAITED=0
+until curl -s -o /dev/null --max-time 6 "$REG"; do
+  [ "$WAITED" -ge "${TWEAK_REGISTRY_WAIT_SEC:-180}" ] && stop "The package server does not answer. Turn on the Wix VPN, then paste the same line again."
+  progress 4 35 "Getting Tweak’s parts" "" true; sleep 5; WAITED=$((WAITED + 5))
+done
 if [ -d node_modules ] && [ "$(cat "$HOME/Tweak/.parts-sum" 2>/dev/null)" = "$LOCK_SUM" ]; then ( true ) & CI=$!   # the same parts as last time: nothing to download
 else ( npm ci --no-audit --no-fund >> "$LOG" 2>&1 && echo "$LOCK_SUM" > "$HOME/Tweak/.parts-sum" ) & CI=$!; fi
 p=35; while kill -0 $CI 2>/dev/null; do sleep 3; [ $p -lt 80 ] && p=$((p + 1)); progress 4 $p "Getting Tweak’s parts" "About 4 GB, once. $(ls node_modules 2>/dev/null | wc -l | tr -d ' ') parts so far."; done
