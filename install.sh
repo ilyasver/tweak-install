@@ -97,8 +97,8 @@ progress 1 5 "Getting the tools" "$VPN_NOTE"
 ensure_node >> "$LOG" 2>&1 || stop "Node did not download." node
 NODE_OK=1
 tell "install started" macos="$(sw_vers -productVersion)" again="$([ -d "$APP/.git" ] && echo true || echo false)" vpn="$([ -z "$VPN_NOTE" ] && echo true || echo false)" ref="$REF"
-ensure_gh >> "$LOG" 2>&1 || stop "GitHub's tool did not download." gh
-ensure_git >> "$LOG" 2>&1 || stop "git did not download." git
+ensure_gh >> "$LOG" 2>&1 || stop "GitHub's tool did not download.${TOOLS_WHY:+ $TOOLS_WHY}" gh
+ensure_git >> "$LOG" 2>&1 || stop "git did not download.${TOOLS_WHY:+ $TOOLS_WHY}" git
 ensure_pm >> "$LOG" 2>&1 || true   # a project can still install without them (package-manager.mjs makes them too)
 
 step signin
