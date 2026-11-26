@@ -189,8 +189,18 @@ export function installMessage(ev, base) {
 
 /** The Mac's facts worth knowing next to a start or a failure: disk above all (Tweak's parts are about 4 GB). */
 function macFacts(home) {
-  const out = { arch: process.arch, cpus: os.cpus().length, memGb: Math.round(os.totalmem() / 2 ** 30) };
+  const out = { arch: process.arch, cpus: os.cpus().length, memGb: Math.round(os.totalmem() / 2 ** 30), ...machineNow() };
   try { const s = fs.statfsSync(home); out.diskGb = Math.round((s.bavail * s.bsize) / 2 ** 30); } catch { /* unknown */ }
+  return out;
+}
+
+/** How busy the Mac is now, in the app's fields (scripts/lib/telemetry.mjs machineStamp: the install is a graded key action, roadmap
+ *  task 14): the 1- and 5-minute load per core and free memory. Sent with the start (before the install loads the Mac itself) and
+ *  with the finish. Never throws. */
+export function machineNow({ loadavg = () => os.loadavg(), cores = () => (typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length), freemem = () => os.freemem() } = {}) {
+  const out = {};
+  try { const l = loadavg(); const n = cores(); if (n > 0) { if (Number.isFinite(l[0])) out.loadPerCpu = Math.round((l[0] / n) * 100) / 100; if (Number.isFinite(l[1])) out.load5PerCpu = Math.round((l[1] / n) * 100) / 100; } } catch { /* unknown */ }
+  try { const f = freemem(); if (Number.isFinite(f)) out.freeMB = Math.round(f / 1048576); } catch { /* unknown */ }
   return out;
 }
 
@@ -219,7 +229,7 @@ export function buildReport(name, fields, base, { now = Date.now(), home = os.ho
       } finally { fs.closeSync(fd); }
     } catch { /* no log: the step and its reason still go */ }
   }
-  const all = name === 'install started' || name === 'install failed' ? { ...macFacts(home), ...data } : data;
+  const all = name === 'install started' || name === 'install failed' ? { ...macFacts(home), ...data } : name === 'install finished' ? { ...machineNow(), ...data } : data;
   return installMessage({ name, at: now, ms: t, data: cleanData(all, base.clean) }, base);
 }
 
