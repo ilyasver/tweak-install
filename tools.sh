@@ -11,7 +11,9 @@ _fake() { mkdir -p "$TOOLS/$1/bin"; printf '#!/bin/sh\necho fake-%s 99.0.0\n' "$
 # GitHub's tools come from github.com's release downloads, never from GitHub's API: the API allows 60 calls an hour
 # per address without a sign-in, an office shares one address, and the sign-in only comes at step 2. (2026-11-16, 09:21:
 # the office's 60 were used up, the API answered 403, and a new tester's install stopped here.)
-GH_PINNED=v2.104.0   # gh when github.com's "latest" names no release; any gh from 2.40 on works
+GH_PINNED=v2.104.0   # gh when github.com's "latest" names no release; any gh from 2.99 on works
+# 2.99 is the first gh that attaches a file to a pull request (`gh pr edit --attach`): Tweak puts the before and after pictures
+# into the pull requests it opens that way (scripts/lib/pr-pictures.mjs). An older gh on the Mac gets Tweak's own copy beside it.
 # GitHub Desktop's portable git, pinned: its file names carry a build hash that only the API lists. To move it, take the
 # tag, the hash and both macOS .tar.gz.sha256 files from https://github.com/desktop/dugite-native/releases.
 DUGITE_TAG=v2.56.1 DUGITE_BUILD=238326e
@@ -69,7 +71,7 @@ ensure_pm() {
 }
 
 ensure_gh() {
-  if command -v gh >/dev/null && gh --version | head -1 | awk '{split($3,v,"."); exit !(v[1]>2 || (v[1]==2 && v[2]>=40))}'; then return 0; fi
+  if command -v gh >/dev/null && gh --version | head -1 | awk '{split($3,v,"."); exit !(v[1]>2 || (v[1]==2 && v[2]>=99))}'; then return 0; fi
   [ -n "${TWEAK_FAKE_DOWNLOAD:-}" ] && { _fake gh; return 0; }
   mkdir -p "$TOOLS" && cd "$TOOLS" || return 1
   TOOLS_WHY=""
